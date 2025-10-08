@@ -17,7 +17,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Simulação de dados de progresso (em produção seria um banco de dados)
 let learningProgress = {
-  totalChallenges: 1,
+  totalChallenges: 2,
   completedChallenges: 0,
   badges: [],
   lastUpdate: new Date().toISOString(),
@@ -29,7 +29,7 @@ let learningProgress = {
   }
 };
 
-// Badge disponível
+// Badges disponíveis
 const availableBadges = {
   'first-steps': {
     name: 'GitHub Actions Master',
@@ -37,6 +37,13 @@ const availableBadges = {
     icon: 'check-circle',
     color: '#238636',
     badgeText: 'DESAFIO 01 CONCLUÍDO'
+  },
+  'testing-master': {
+    name: 'Testing Master',
+    description: 'Completou o Desafio 02 - Testes Automatizados',
+    icon: 'test-tube',
+    color: '#238636',
+    badgeText: 'DESAFIO 02 CONCLUÍDO'
   }
 };
 
@@ -89,11 +96,34 @@ app.get('/api/badge/:badgeId', (req, res) => {
 });
 
 // Gerar certificado visual para compartilhamento
-app.get('/api/certificate/:username', (req, res) => {
+app.get('/api/certificate/:username/:level?', (req, res) => {
   const username = req.params.username;
+  const level = req.params.level || '1'; // Default level 1
 
-  if (!learningProgress.badges.includes('first-steps')) {
-    return res.status(404).json({ error: 'Certificado não disponível. Complete o desafio primeiro!' });
+  const certificateConfig = {
+    '1': {
+      badge: 'first-steps',
+      title: 'Desafio 01 - GitHub Actions Básico',
+      color: '#238636',
+      competencies: [
+        '✓ Configuração de workflow básico  ✓ Uso de actions do marketplace',
+        '✓ Definição de jobs e steps  ✓ Variáveis de ambiente  ✓ Build e health check automatizados'
+      ]
+    },
+    '2': {
+      badge: 'testing-master',
+      title: 'Desafio 02 - Testes Automatizados',
+      color: '#1f6feb',
+      competencies: [
+        '✓ Configuração de testes automatizados  ✓ Análise de cobertura de código',
+        '✓ Integração com Jest  ✓ Validação de qualidade  ✓ Relatórios de teste'
+      ]
+    }
+  };
+
+  const config = certificateConfig[level];
+  if (!config || !learningProgress.badges.includes(config.badge)) {
+    return res.status(404).json({ error: `Certificado nível ${level} não disponível. Complete o desafio primeiro!` });
   }
 
   const currentDate = new Date().toLocaleDateString('pt-BR', {
@@ -134,8 +164,8 @@ app.get('/api/certificate/:username', (req, res) => {
     concluiu com sucesso o desafio
   </text>
   
-  <text x="400" y="320" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="bold" fill="#238636">
-    Desafio 01 - GitHub Actions Básico
+  <text x="400" y="320" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="bold" fill="${config.color}">
+    ${config.title}
   </text>
   
   <!-- Competências -->
@@ -144,10 +174,10 @@ app.get('/api/certificate/:username', (req, res) => {
   </text>
   
   <text x="400" y="400" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#8b949e">
-    ✓ Configuração de workflow básico  ✓ Uso de actions do marketplace
+    ${config.competencies[0]}
   </text>
   <text x="400" y="420" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#8b949e">
-    ✓ Definição de jobs e steps  ✓ Variáveis de ambiente  ✓ Build e health check automatizados
+    ${config.competencies[1]}
   </text>
   
   
@@ -166,9 +196,27 @@ app.get('/api/certificate/:username', (req, res) => {
 </svg>`;
 
   res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
-  res.setHeader('Content-Disposition', `inline; filename="certificado-${username}-descomplicando-github-actions.svg"`);
+  res.setHeader('Content-Disposition', `inline; filename="certificado-${username}-level-${level}-descomplicando-github-actions.svg"`);
   res.send(certificateSVG);
 });
+
+// Função helper para verificar se o certificado foi gerado
+async function checkCertificate(username, repository, runId, certificateName) {
+  try {
+    const artifactsUrl = `https://api.github.com/repos/${username}/${repository}/actions/runs/${runId}/artifacts`;
+    const artifactsResponse = await fetch(artifactsUrl);
+    const artifactsData = await artifactsResponse.json();
+
+    return artifactsData.artifacts &&
+      artifactsData.artifacts.some(artifact =>
+        artifact.name.includes(certificateName) ||
+        artifact.name.includes('certificate')
+      );
+  } catch (error) {
+    console.log('Erro ao verificar artefatos:', error);
+    return false;
+  }
+}
 
 // Verificar status do workflow no GitHub
 app.post('/api/check-github-status', async (req, res) => {
@@ -180,40 +228,12 @@ app.post('/api/check-github-status', async (req, res) => {
     }
 
     // Fazer request para a API do GitHub para verificar workflow runs
-    const apiUrl = `https://api.github.com/repos/${username}/${repository}/actions/runs?status=success&per_page=10`;
+    const apiUrl = `https://api.github.com/repos/${username}/${repository}/actions/runs?status=success&per_page=20`;
 
     const response = await fetch(apiUrl);
     const data = await response.json();
 
     if (response.ok && data.workflow_runs) {
-      // Verificar se existe algum workflow run bem-sucedido
-      const successfulRuns = data.workflow_runs.filter(run =>
-        run.status === 'completed' &&
-        run.conclusion === 'success' &&
-        run.name && run.name.includes('Basic CI')
-      );
-
-      // Verificar se algum dos runs tem artefatos (certificado foi gerado)
-      let hasArtifacts = false;
-      if (successfulRuns.length > 0) {
-        // Verificar artefatos do run mais recente
-        const latestRun = successfulRuns[0];
-        const artifactsUrl = `https://api.github.com/repos/${username}/${repository}/actions/runs/${latestRun.id}/artifacts`;
-
-        try {
-          const artifactsResponse = await fetch(artifactsUrl);
-          const artifactsData = await artifactsResponse.json();
-
-          hasArtifacts = artifactsData.artifacts &&
-            artifactsData.artifacts.some(artifact =>
-              artifact.name.includes('level-1-certificate') ||
-              artifact.name.includes('certificate')
-            );
-        } catch (error) {
-          console.log('Erro ao verificar artefatos:', error);
-        }
-      }
-
       // Verificar se o repositório tem o nome exato (case insensitive)
       const validRepoNames = [
         'linuxtips-github-actions',
@@ -224,33 +244,6 @@ app.post('/api/check-github-status', async (req, res) => {
         repository.toLowerCase() === validName.toLowerCase()
       );
 
-      if (successfulRuns.length > 0 && hasArtifacts && repoNameValid && !learningProgress.badges.includes('first-steps')) {
-        // Atualizar progresso automaticamente
-        learningProgress.badges.push('first-steps');
-        learningProgress.completedChallenges = 1;
-        learningProgress.stats.successfulBuilds += 1;
-        learningProgress.stats.commits += 1;
-        learningProgress.lastUpdate = new Date().toISOString();
-
-        return res.json({
-          success: true,
-          badgeEarned: true,
-          certificateReady: true,
-          username: username,
-          message: 'Parabéns! Workflow executado com sucesso e certificado gerado!',
-          progress: learningProgress
-        });
-      }
-
-      if (successfulRuns.length > 0 && !hasArtifacts) {
-        return res.json({
-          success: true,
-          badgeEarned: false,
-          message: 'Workflow executado, mas aguardando geração do certificado. Verifique os artefatos.',
-          progress: learningProgress
-        });
-      }
-
       if (!repoNameValid) {
         return res.json({
           success: false,
@@ -260,10 +253,77 @@ app.post('/api/check-github-status', async (req, res) => {
         });
       }
 
+      // Verificar Nível 1 - Basic CI
+      const level1Runs = data.workflow_runs.filter(run =>
+        run.status === 'completed' &&
+        run.conclusion === 'success' &&
+        run.name && run.name.includes('Basic CI')
+      );
+
+      // Verificar Nível 2 - Testes Automatizados
+      const level2Runs = data.workflow_runs.filter(run =>
+        run.status === 'completed' &&
+        run.conclusion === 'success' &&
+        run.name && run.name.includes('Testes Automatizados')
+      );
+
+      let newBadges = [];
+      let certificatesReady = [];
+      
+      // Verificar certificados do nível 1
+      if (level1Runs.length > 0 && !learningProgress.badges.includes('first-steps')) {
+        const hasLevel1Certificate = await checkCertificate(username, repository, level1Runs[0].id, 'level-1-certificate');
+        if (hasLevel1Certificate) {
+          learningProgress.badges.push('first-steps');
+          newBadges.push('first-steps');
+          certificatesReady.push('level-1');
+        }
+      }
+
+      // Verificar certificados do nível 2
+      if (level2Runs.length > 0 && !learningProgress.badges.includes('testing-master')) {
+        const hasLevel2Certificate = await checkCertificate(username, repository, level2Runs[0].id, 'level-2-certificate');
+        if (hasLevel2Certificate) {
+          learningProgress.badges.push('testing-master');
+          newBadges.push('testing-master');
+          certificatesReady.push('level-2');
+        }
+      }
+
+      // Atualizar stats se novos badges foram conquistados
+      if (newBadges.length > 0) {
+        learningProgress.completedChallenges = learningProgress.badges.length;
+        learningProgress.stats.successfulBuilds += newBadges.length;
+        learningProgress.stats.commits += 1;
+        learningProgress.stats.testsRun += (newBadges.includes('testing-master') ? 1 : 0);
+        learningProgress.lastUpdate = new Date().toISOString();
+
+        return res.json({
+          success: true,
+          badgeEarned: true,
+          certificateReady: true,
+          newBadges: newBadges,
+          certificatesReady: certificatesReady,
+          username: username,
+          message: `Parabéns! ${newBadges.length > 1 ? 'Novos badges' : 'Novo badge'} conquistado${newBadges.length > 1 ? 's' : ''}!`,
+          progress: learningProgress
+        });
+      }
+
+      // Se chegou até aqui, verificar se há workflows mas sem certificados
+      if (level1Runs.length > 0 || level2Runs.length > 0) {
+        return res.json({
+          success: true,
+          badgeEarned: false,
+          message: 'Workflows executados, mas aguardando geração dos certificados. Verifique os artefatos.',
+          progress: learningProgress
+        });
+      }
+
       return res.json({
         success: true,
         badgeEarned: false,
-        message: 'Execute o workflow no GitHub Actions e aguarde a geração do certificado.',
+        message: 'Execute os workflows no GitHub Actions e aguarde a geração dos certificados.',
         progress: learningProgress
       });
     }
@@ -349,7 +409,7 @@ app.get('/api/repository-info', (req, res) => {
 // Rota para reset (útil para testes)
 app.post('/api/reset', (req, res) => {
   learningProgress = {
-    totalChallenges: 1,
+    totalChallenges: 2,
     completedChallenges: 0,
     badges: [],
     lastUpdate: new Date().toISOString(),
@@ -362,6 +422,36 @@ app.post('/api/reset', (req, res) => {
   };
 
   res.json({ success: true, message: 'Progresso resetado!' });
+});
+
+// Rota para debug - verificar certificados disponíveis
+app.get('/api/certificates/:username', (req, res) => {
+  const username = req.params.username;
+  const availableCertificates = [];
+
+  if (learningProgress.badges.includes('first-steps')) {
+    availableCertificates.push({
+      level: 1,
+      title: 'GitHub Actions Básico',
+      url: `/api/certificate/${username}/1`
+    });
+  }
+
+  if (learningProgress.badges.includes('testing-master')) {
+    availableCertificates.push({
+      level: 2,
+      title: 'Testes Automatizados',
+      url: `/api/certificate/${username}/2`
+    });
+  }
+
+  res.json({
+    username,
+    currentBadges: learningProgress.badges,
+    availableCertificates,
+    totalChallenges: learningProgress.totalChallenges,
+    completedChallenges: learningProgress.completedChallenges
+  });
 });
 
 // Rota principal
