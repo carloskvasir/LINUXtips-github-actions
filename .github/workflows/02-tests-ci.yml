@@ -46,6 +46,23 @@ jobs:
             echo "coverage=0" >> $GITHUB_OUTPUT
           fi
 
+      - name: "Validar cobertura mínima"
+        run: |
+          COVERAGE=${{ steps.coverage.outputs.coverage }}
+          echo "Cobertura atual: $COVERAGE%"
+          echo "Cobertura mínima exigida: ${{ env.COVERAGE_MIN }}%"
+          
+          # Converter para inteiro para comparação
+          COVERAGE_INT=$(printf "%.0f" $COVERAGE)
+          
+          if [ $COVERAGE_INT -lt ${{ env.COVERAGE_MIN }} ]; then
+            echo "❌ FALHA: Cobertura de $COVERAGE% está abaixo do mínimo de ${{ env.COVERAGE_MIN }}%"
+            echo "Por favor, adicione mais testes para aumentar a cobertura."
+            exit 1
+          else
+            echo "✅ SUCESSO: Cobertura de $COVERAGE% atende o mínimo de ${{ env.COVERAGE_MIN }}%"
+          fi
+
       - name: "Upload do relatório de cobertura"
         uses: actions/upload-artifact@v4
         if: always()
